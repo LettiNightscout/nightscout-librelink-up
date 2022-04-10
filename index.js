@@ -72,6 +72,7 @@ const nightScoutHttpHeaders = {
 }
 
 const schedule = "*/" + (process.env.LINK_UP_TIME_INTERVAL || 5) + " * * * *";
+login();
 logger.info("Starting cron schedule: " + schedule)
 cron.schedule(schedule, () => {main();}, {});
 
@@ -99,6 +100,7 @@ async function login() {
 
         try {
             logger.info("Logged in to LibreLink Up");
+            logger.debug(JSON.stringify(response.data));
             updateAuthTicket(response.data.data.authTicket);
         } catch (err) {
             logger.error("Invalid authentication token. Please check your LibreLink Up credentials", err);
@@ -125,6 +127,7 @@ async function getGlucoseMeasurements() {
 
         logger.info("Received blood glucose measurement items");
 
+        // logger.debug(JSON.stringify(response.data.data));
         await uploadToNightScout(response.data.data);
     } catch (error) {
         logger.error("Error getting glucose measurements", error);
@@ -184,13 +187,25 @@ async function lastEntryDate() {
         {
             headers: nightScoutHttpHeaders
         });
-
-    return new Date(response.data.pop().dateString);
+    logger.debug(JSON.stringify(response.data.pop()))
+    if (response.data.length === 0) 
+    {
+        // In some cases there are no data returned from Nightscout (e.g. when
+        // we did not filled in anything a long time ago). For these cases we
+        // automatically create a date 6 hours before the current time. 
+        
+        // If this is not done, the script dies with 'Cannot read properties of
+        // undefined (reading 'dateString')'.
+        let currentDate = new Date();
+        return new Date(currentDate.getTime() - 360*60000);
+    }
+    else return new Date(response.data.pop().dateString);
 }
 
 async function uploadToNightScout(measurementData) {
     const glucoseMeasurement = measurementData.connection.glucoseMeasurement;
     const measurementDate = getUtcDateFromString(glucoseMeasurement.FactoryTimestamp);
+    logger.debug(measurementDate.toISOString());
 
     let lastEntry = await lastEntryDate();
 
@@ -198,6 +213,7 @@ async function uploadToNightScout(measurementData) {
 
     // Add the most recent measurement first
     if (measurementDate > lastEntry) {
+        logger.debug(measurementDate.toISOString());
         formattedMeasurements.push({
             "type": "sgv",
             "dateString": measurementDate.toISOString(),
